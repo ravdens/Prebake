@@ -1,0 +1,24 @@
+# ---- Stage 1: Base ----
+FROM fedora:43 AS base
+WORKDIR /app
+COPY requirements.txt .
+
+# ---- Stage 2: pre-build ----
+FROM base AS pre-build
+RUN dnf install -y python3 python3-pip
+
+# ---- Stage 3: Build ----
+FROM pre-build AS build
+COPY . .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# ---- Stage 4: Test ----
+FROM build AS test
+RUN python -m unittest discover -s tests || echo "Tests failed, but continuing"
+
+# ---- Stage 5: Final Runtime ----
+FROM fedora:43 AS final
+WORKDIR /app
+COPY --from=build /app /app
+EXPOSE 5000
+CMD ["python", "app.py"]

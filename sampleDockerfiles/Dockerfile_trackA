@@ -1,0 +1,15 @@
+# ---- Stage 1: Base ----
+FROM build:prebake AS track-a-build
+RUN touch track-a-build.txt
+
+# ---- Stage 2: Test ----
+FROM track-a-build AS track-a-test
+RUN touch track-a-test.txt
+RUN python -m unittest discover -s tests || echo "Tests failed, but continuing"
+
+# ---- Stage 3: Final Runtime ----
+FROM fedora:43 AS track-a-final
+WORKDIR /app
+RUN touch track-a-final.txt
+COPY --from=track-a-build /app /app
+CMD ["python", "helloBase.py"]

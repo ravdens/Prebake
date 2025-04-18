@@ -1,0 +1,14 @@
+# ---- Stage 1: Base ----
+FROM ubuntu:plucky AS track-f-build
+RUN touch track-f-build.txt
+
+# ---- Stage 2: Test ----
+FROM track-f-build AS track-f-test
+RUN touch track-f-test.txt
+
+# ---- Stage 3: Final Runtime ----
+FROM ubuntu:plucky AS track-f-final
+WORKDIR /app
+RUN touch track-f-final.txt
+COPY --from=track-f-build / /app
+CMD ["sleep", "60"]

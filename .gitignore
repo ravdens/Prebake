@@ -1,0 +1,8 @@
+# Ignore playground directory and all its contents
+playground/
+
+# Ignore venvPrebake directory (Python virtual environment)
+venvPrebake/
+
+# Ignore all files with .hcl extension
+*.hcl

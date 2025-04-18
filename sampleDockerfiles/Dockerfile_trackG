@@ -1,0 +1,20 @@
+# Note: this Dockerfile uses trackC, which uses trackB in its pre-build stage
+# The goal here is to have a three level dependency chain
+
+# ---- Stage 1: Build ----
+    FROM my.made.up.registry/storage/track-c-build:prebake AS track-g-build
+    COPY . .
+    RUN pip install --no-cache-dir -r requirements.txt
+    RUN touch track-g-build.txt
+    
+    # ---- Stage 2: Test ----
+    FROM track-g-build AS track-g-test
+    RUN python -m unittest discover -s tests || echo "Tests failed, but continuing"
+    RUN touch track-g-test.txt
+    
+    # ---- Stage 3: Final Runtime ----
+    FROM fedora:43 AS track-g-final
+    WORKDIR /app
+    RUN touch track-g-final.txt
+    COPY --from=track-e-build /app /app
+    CMD ["python", "helloBase.py"]
