@@ -1,5 +1,7 @@
-# Note: this Dockerfile uses trackC, which uses trackB in its pre-build stage
-# The goal here is to have a three level dependency chain
+# Note: 
+#    This Dockerfile simulates using a custom registry. This is valid, however, unless you set up the
+#    registry it will not build.
+#    This Dockerfile uses trackC, which uses trackB in its pre-build stage
 
 # ---- Stage 1: Build ----
     FROM my.made.up.registry/storage/track-c-build:prebake AS track-g-build

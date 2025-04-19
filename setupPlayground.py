@@ -47,6 +47,7 @@ def main():
         "trackD": os.path.join(playground, "top", "second_B", "second_B_third_D"),
         "trackE": os.path.join(playground, "top", "second_B", "second_B_third_E"),
         "trackF": os.path.join(playground, "top", "second_B", "second_B_third_F"),
+        "trackH": os.path.join(playground, "top", "second_B", "second_B_third_H"),
     }
 
     # If customRegistry is specified, add the trackG directory
@@ -59,6 +60,7 @@ def main():
     
     # Copy each dockerfile to its destination
     for track, dir_path in directories.items():
+        print(f"\n copying {track} to {dir_path}\n")
         # Skip trackG if customRegistry is not specified
         if track == "trackG" and not args.customRegistry:
             continue
