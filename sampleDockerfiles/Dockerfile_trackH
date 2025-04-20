@@ -1,0 +1,32 @@
+# Note: 
+#    This Dockerfile simulates using a custom registry. While this is valid, unless you set up the registry,
+#    it will not build.
+#    This Dockerfile uses trackB to create a pre-build stage. Then mounts the pre-build stage into the build stage.
+
+
+# syntax=docker/dockerfile:1.7
+
+# ---- Stage 1 pre-build ----
+FROM track-b-pre-build:prebake AS track-h-pre-build
+RUN dnf install -y python3 python3-pip; dnf clean all
+RUN echo "This is from pre-build" > /track-h-pre-build.txt
+
+
+# ---- Stage 2: Build ----
+FROM fedora:43 AS track-h-build
+WORKDIR /app
+
+# Mount file from pre-build stage and copy it with a new name
+RUN --mount=type=bind,from=track-h-pre-build,source=/track-h-pre-build.txt,target=/tmp/from-pre.txt \
+    cp /tmp/from-pre.txt ./track-h-build.txt
+
+COPY . .
+RUN pip install --no-cache-dir -r requirements.txt
+
+
+# ---- Stage 3: Final Runtime ----
+FROM fedora:43 AS track-h-final
+WORKDIR /app
+COPY --from=track-h-build /app /app
+RUN touch track-h-final.txt
+CMD ["python", "helloBase.py"]

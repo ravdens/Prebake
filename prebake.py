@@ -7,6 +7,7 @@ from colorama import Fore, Style
 import logging, sys
 import argparse
 import pdb
+import random
 
 logging.basicConfig(
     stream=sys.stdout,
@@ -130,6 +131,7 @@ def parse_dockerfiles(root_dir):
 
     from_pattern = re.compile(r'^FROM\s+([^\s]+)\s+AS\s+(\S+)', re.IGNORECASE)
     copy_from_pattern = re.compile(r'COPY\s+--from=([^\s]+)', re.IGNORECASE)
+    mount_from_pattern = re.compile(r'--mount=.*?from=([^\s,\\]+)', re.IGNORECASE)
 
     for file in find_dockerfiles(root_dir):
         with open(file, 'r') as f:
@@ -151,6 +153,9 @@ def parse_dockerfiles(root_dir):
 
             for copy_match in copy_from_pattern.finditer(line):
                 processing_stage.add_dependency(copy_match.group(1))
+
+            for mount_match in mount_from_pattern.finditer(line):
+                processing_stage.add_dependency(mount_match.group(1))
 
         # Lazy way to make sure we got the last stage
         if processing_stage is not None:
@@ -186,6 +191,8 @@ def find_crossover_stages(stages):
         # Find all FROM...AS statements
         from_pattern = re.compile(r'^FROM\s+([^\s]+)\s+AS\s+(\S+)', re.IGNORECASE | re.MULTILINE)
         copy_from_pattern = re.compile(r'COPY\s+--from=([^\s]+)', re.IGNORECASE)
+        mount_from_pattern = re.compile(r'--mount=.*?from=([^\s,\\]+)', re.IGNORECASE)
+
         matches = from_pattern.findall(content)
         for base_image, stage_name in matches:
             # Deal with versioning that crossover images will have in their non-native Dockerfile
@@ -199,6 +206,14 @@ def find_crossover_stages(stages):
 
         copy_matches = copy_from_pattern.findall(content)
         for base_image in copy_matches:
+            for stage in stages:
+                if stage.stage_name == base_image and stage.file_path != file_path:
+                    # Check if this stage exists in a different Dockerfile
+                    if stage.file_path != file_path:
+                        crossover_stages.add(stage.stage_name)
+
+        mount_matches = mount_from_pattern.findall(content)
+        for base_image in mount_matches:
             for stage in stages:
                 if stage.stage_name == base_image and stage.file_path != file_path:
                     # Check if this stage exists in a different Dockerfile
@@ -274,7 +289,7 @@ def deep_recursion(original_stages, examine_stage, record_to_stage, unresolved_s
 
     if examine is not None:
         # If the stage has already been explored, we don't need to learn the dependencies again
-        if examine_stage.explored:
+        if record_to_stage.explored:
             for dep in examine:
                 record_to_stage.add_dependency(dep)
         else:
@@ -449,7 +464,19 @@ def group_stages_by_build_order(stages, unresolved_set):
     # TODO: benchmark sorted and unsorted. Gambling that this is dumb and marginally faster
     stages = order_stages_by_dependency_count(stages)
 
+    if args.verbose:
+        cli_middle("Pre kahns - stage order")
+        for item in stages:
+            cli_info(f" {item.show()}")
+        cli_div()
+
     stages = kahns_algo(stages, unresolved_set)
+
+    if args.verbose:
+        cli_middle("Pre Grouping - stage order")
+        for item in stages:
+            cli_info(f" {item.show()}")
+        cli_div()
 
     def group_stages_by_dependency_barrier(ordered_stages, unresolved_set):
         seen_names = unresolved_set.copy()
@@ -682,12 +709,26 @@ def main():
         cli_info(f" {tag}")
     cli_div()
 
+    if args.verbose:
+        cli_middle("Pre Deep dependency - stage order")
+        for item in stages:
+            cli_info(f" {item.show()}")
+        cli_div()
+
+    #TODO: Consider removing shuffle. Windows and Linux end up with different orderings. This creates a less efficient build order
+    #  when run on Linux. In an effort to help development better target Linux, leave this shuffle in for now.
+    random.shuffle(stages)
+
     cli_middle("Deep dependency search")
     unresolved_set = set()
     deep_dependency_search(stages, unresolved_set, crossover_stages)
     cli_middle()
     for item in stages:
         cli_info(f" {item.show()}")
+
+    for statge in stages:
+        stage.explored = False
+    deep_dependency_search(stages, unresolved_set, crossover_stages)
 
     cli_div()
     cli_unresolved(unresolved_set)
