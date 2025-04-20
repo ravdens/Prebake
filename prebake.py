@@ -715,7 +715,8 @@ def main():
             cli_info(f" {item.show()}")
         cli_div()
 
-    #TODO: remove. This is for debug
+    #TODO: Consider removing shuffle. Windows and Linux end up with different orderings. This creates a less efficient build order
+    #  when run on Linux. In an effort to help development better target Linux, leave this shuffle in for now.
     random.shuffle(stages)
 
     cli_middle("Deep dependency search")
