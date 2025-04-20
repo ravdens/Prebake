@@ -7,6 +7,7 @@ from colorama import Fore, Style
 import logging, sys
 import argparse
 import pdb
+import random
 
 logging.basicConfig(
     stream=sys.stdout,
@@ -463,7 +464,19 @@ def group_stages_by_build_order(stages, unresolved_set):
     # TODO: benchmark sorted and unsorted. Gambling that this is dumb and marginally faster
     stages = order_stages_by_dependency_count(stages)
 
+    if args.verbose:
+        cli_middle("Pre kahns - stage order")
+        for item in stages:
+            cli_info(f" {item.show()}")
+        cli_div()
+
     stages = kahns_algo(stages, unresolved_set)
+
+    if args.verbose:
+        cli_middle("Pre Grouping - stage order")
+        for item in stages:
+            cli_info(f" {item.show()}")
+        cli_div()
 
     def group_stages_by_dependency_barrier(ordered_stages, unresolved_set):
         seen_names = unresolved_set.copy()
@@ -696,12 +709,25 @@ def main():
         cli_info(f" {tag}")
     cli_div()
 
+    if args.verbose:
+        cli_middle("Pre Deep dependency - stage order")
+        for item in stages:
+            cli_info(f" {item.show()}")
+        cli_div()
+
+    #TODO: remove. This is for debug
+    random.shuffle(stages)
+
     cli_middle("Deep dependency search")
     unresolved_set = set()
     deep_dependency_search(stages, unresolved_set, crossover_stages)
     cli_middle()
     for item in stages:
         cli_info(f" {item.show()}")
+
+    for statge in stages:
+        stage.explored = False
+    deep_dependency_search(stages, unresolved_set, crossover_stages)
 
     cli_div()
     cli_unresolved(unresolved_set)
