@@ -46,6 +46,7 @@ class DockerStage:
         # Usage dependencies will init empty but be filled later
         # Set data structure to help dedup
         self.usage_dependencies = set()
+        self.usage_dependencies_list = []
 
     def add_dependency(self, dependency):
         """
@@ -66,6 +67,13 @@ class DockerStage:
         # Include the base image as a dependency
         all_dependencies.add(self.base_image)
         return all_dependencies
+    
+    def init_optimize_dependencies_list(self):
+        """
+        Initialize the usage dependencies list with the base image and all dependencies.
+        """
+        self.usage_dependencies_list = list(self.get_all_dependencies())
+
     
     def remove_version(self, image_name_with_version):
         """
@@ -602,6 +610,91 @@ def create_docker_bake_hcl(sorted_groups, crossover_images, tag, output_file="do
 
 # endregion
 
+# region Optimize Logic
+
+def optimize(stages, unresolved_set, crossover_stages, sorted_groups):
+    """
+    Optimize the Dockerfile stages by performing a deep dependency search and grouping them by build order.
+    Minimal mutation. Only overrides the explored and grouped flags on the stages.
+    Params:
+        - stages: list[DockerStage] list of stages to optimize
+        - unresolved_set: set() set of unresolved dependencies
+        - crossover_stages: set() set of crossover stages
+        - sorted_groups: list[list[DockerStage]] list of groups of stages that can be built in parallel.
+    Returns:
+        -sorted_groups: list[list[DockerStage]]: A list of groups of stages that can be built in parallel.
+    """
+
+    if args.optimize == 0:
+        return
+    
+    # Disable verbose logging for the optimization process
+    re_enable_verbose = False
+    if args.verbose:
+        re_enable_verbose = True
+        args.verbose = False
+    
+    str_num_attempts = str(args.optimize)
+    
+    # List to contain all brute force attempts to group stages
+    grouping_attempts = []
+    optimization_attempts = args.optimize
+    
+    # Do not mutate the originals during the optimization process
+    # Prepare the original stages to be optimized
+    for stage in stages:
+        stage.init_optimize_dependencies_list()
+    clone_stages = stages.copy()
+    clone_unresolved_set = unresolved_set.copy()
+    clone_crossover_stages = crossover_stages.copy()
+    clone_sorted_groups = sorted_groups.copy()
+
+    while optimization_attempts > 0:
+        for stage in clone_stages:
+            stage.explored = False
+            stage.grouped = False
+            # Randomize the list. Hopefully things land better
+            random.shuffle(stage.usage_dependencies_list)
+
+        for stage in clone_stages:
+            # If the stage has already been explored, skip it
+            if stage.explored:
+                continue
+            else:
+                orig_stage = find_stage_by_name(clone_stages, stage.stage_name)
+                deep_recursion(clone_stages, orig_stage, stage, clone_unresolved_set, clone_crossover_stages)
+                stage.explored = True
+
+        deep_dependency_search(clone_stages, clone_unresolved_set, clone_crossover_stages)
+        attempt_sorted_groups = group_stages_by_build_order(clone_stages, clone_unresolved_set)
+        grouping_attempts.append(attempt_sorted_groups)
+
+        optimization_attempts -= 1
+
+    # Determine the number of groups produced by the brute force attempts
+    # Log the best and worst attempts
+    best_attempt = sorted_groups
+    worst_attempt = sorted_groups
+    for attempt in grouping_attempts:
+        if len(attempt) < len(best_attempt):
+            best_attempt = attempt
+        if len(attempt) > len(worst_attempt):
+            worst_attempt = attempt
+        
+    cli_middle(f"Optimized Dockerfile...with {str_num_attempts} brute force attempts")
+    cli_info(f"Fewest groupings: {len(best_attempt)}")
+    cli_info(f"Fewest groupings: {len(worst_attempt)}")
+    cli_info(f"Pre-optimization groupings: {len(sorted_groups)}")
+    cli_div()
+
+    # Re-enable verbose logging for the optimization process
+    if re_enable_verbose:
+        args.verbose = True
+
+    return best_attempt
+
+# endregion
+
 # region CLI Display Functions
 
 def cli_header():
@@ -726,15 +819,15 @@ def main():
     for item in stages:
         cli_info(f" {item.show()}")
 
-    for statge in stages:
-        stage.explored = False
-    deep_dependency_search(stages, unresolved_set, crossover_stages)
-
     cli_div()
     cli_unresolved(unresolved_set)
     cli_div()
 
     sorted_groups = group_stages_by_build_order(stages, unresolved_set)
+
+    # Optimize does not mutate. Save returned value to stages
+    sorted_groups = optimize(stages, unresolved_set, crossover_stages, sorted_groups)
+
     cli_middle()
     cli_middle("Sorted groups by build order:")
     for group in sorted_groups:
@@ -781,6 +874,13 @@ if __name__ == "__main__":
         "-v", "--verbose",
         action="store_true",
         help="Enable verbose output."
+    )
+
+    parser.add_argument(
+        "--optimize",
+        type=int,
+        default=0,
+        help="Optimize the Dockerfile for faster builds. Currently brute force method. Specify the number of brute force attempts to make. Will not optimize if not set."
     )
 
     global args
