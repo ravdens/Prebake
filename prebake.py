@@ -573,6 +573,21 @@ def create_docker_bake_hcl(sorted_groups, crossover_images, tag, output_file="do
     Returns:
         - None : writes file to disk when called.
     """
+
+    
+    # Generate the bake hcl output
+    # 0 = no output. 1 = registry, 2 = local, 3 = registry, local.
+    output = None
+    if args.output != 0:
+        if args.output == 1:
+            output = '"type=registry"'
+        elif args.output == 2:
+            output = '"type=docker"'
+        elif args.output == 3:
+            output = '"type=registry" "type=docker"'
+        output = f"output = [{output}]"
+    
+
     try:
         with open(output_file, "w", encoding="utf-8") as f:
             f.write('// Docker Bake HCL file generated automatically with Prebake\n\n')
@@ -586,12 +601,14 @@ def create_docker_bake_hcl(sorted_groups, crossover_images, tag, output_file="do
                     all_written.add(stage.stage_name)
                     f.write(f'target "{stage.stage_name}" {{\n')
                     f.write(f'  dockerfile = "{stage.file_path}"\n')
-                    f.write(f'  target     = "{stage.stage_name}"\n')
+                    f.write(f'  target     = "{stage.registry}{stage.stage_name}"\n')
                     f.write( '  args = {\n')
                     f.write(f'    BASE_IMAGE = "{stage.base_image}"\n')
                     f.write( '  }\n')
                     if stage.stage_name in crossover_images:
                         f.write(f'  tags = ["{stage.stage_name}:{tag}"]\n')
+                        #TODO: decide if determining output by checking if tag is none or by in cross over is better
+                        f.write(f'  {output}\n')
                     f.write("}\n\n")
 
             # Now write the groups
@@ -838,7 +855,7 @@ def main():
 
     cli_div()
     cli_middle("Creating Docker Bake HCL file...")
-    create_docker_bake_hcl(sorted_groups, crossover_stages, args.tag, args.output)
+    create_docker_bake_hcl(sorted_groups, crossover_stages, args.tag, args.outfile)
 
     end_time = time.time()
 
@@ -859,7 +876,7 @@ if __name__ == "__main__":
         help="Root directory to start search and parsing for Dockerfiles. Hint: make this the root directory of your project."
     )
     parser.add_argument(
-        "-o", "--output",
+        "-o", "--outfile",
         type=str,
         default=os.path.join(os.getcwd(), "docker.hcl"),
         help="Output file for Docker Bake HCL configuration. Defaults to 'docker.hcl' in the current working directory."
@@ -882,6 +899,14 @@ if __name__ == "__main__":
         default=0,
         help="Optimize the Dockerfile for faster builds. Currently brute force method. Specify the number of brute force attempts to make. Will not optimize if not set."
     )
+
+    parser.add_argument(
+        "--output",
+        type=int,
+        default=0,
+        help="Output the Docker Bake HCL configuration to a file. Defaults to 0 (no output). 1 = registry, 2 = local, 3 = registry, local."
+    )
+
 
     global args
     args = parser.parse_args()
