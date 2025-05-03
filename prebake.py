@@ -563,6 +563,21 @@ def validate_directory(directory):
         print(Fore.RED + f"# Error: {directory} is not a valid directory." + Style.RESET_ALL)
         exit(1)
 
+def valildate_arg_file(file_path):
+    """
+    Validate if the given file exists and is a file.
+
+    Params:
+        - file_path: str: The file to validate.
+    Returns:
+        - bool: True if the file exists and is a file, False otherwise.
+    """
+    if os.path.isfile(file_path):
+        return True
+    else:
+        print(Fore.RED + f"# Error: {file_path} is not a valid file." + Style.RESET_ALL)
+        exit(1) 
+
 def create_docker_bake_hcl(sorted_groups, crossover_images, tag, output_file="docker_bake.hcl"):
     """
     Create a Docker Bake HCL file based on the sorted groups of DockerStage objects.
@@ -905,6 +920,13 @@ if __name__ == "__main__":
         type=int,
         default=0,
         help="Output the Docker Bake HCL configuration to a file. Defaults to 0 (no output). 1 = registry, 2 = local, 3 = registry, local."
+    )
+
+    parser.add_argument(
+        "--args",
+        type=str,
+        default=os.path.join(os.getcwd(), "prebakeArgs.txt"),
+        help="Specify a file to read args from."
     )
 
 
