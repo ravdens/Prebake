@@ -93,6 +93,14 @@ class DockerStage:
 
             if image_name_with_version == self.base_image:
                 self.base_image = self.base_image.split(":")[0]
+
+    def get_registry_value(self):
+        """
+        Getter for the registry value. Returns empty string if None.
+        Returns:
+            - str: The registry value for this stage.
+        """
+        return self.registry if self.registry is not None else ""
     
     def show(self):
         """
@@ -615,15 +623,10 @@ def create_docker_bake_hcl(sorted_groups, crossover_images, tag, output_file="do
                     if stage.stage_name in all_written:
                         continue
 
-                    if stage.registry is not None:
-                        target_value = f"{stage.registry}{stage.stage_name}"
-                    else:
-                        target_value = f"{stage.stage_name}"
-
                     all_written.add(stage.stage_name)
                     f.write(f'target "{stage.stage_name}" {{\n')
                     f.write(f'  dockerfile = "{stage.file_path}"\n')
-                    f.write(f'  target     = "{target_value}"\n')
+                    f.write(f'  target     = "{stage.get_registry_value()}{stage.stage_name}"\n')
                     f.write( '  args = {\n')
                     f.write(f'    BASE_IMAGE = "{stage.base_image}"\n')
                     f.write( '  }\n')
