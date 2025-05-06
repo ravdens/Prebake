@@ -741,19 +741,64 @@ def optimize(stages, unresolved_set, crossover_stages, sorted_groups):
 
 # region Modify Logic
 
-
-
-def modify_add_arg_to_hcl(file_path, add_arg):
+def modify_add_arg_hcl(file_path, add_arg):
     cli_info(f"Adding {add_arg} to {file_path}")
+    #TODO: implement this
 
-def modify_remove_arg_to_hcl(file_path, remove_arg):
+def modify_remove_arg_hcl(file_path, remove_arg):
     cli_info(f"Removing {remove_arg} from {file_path}")
+    #TODO: implement this
 
 def modify_add_cache_to_hcl(file_path, add_cache):
     cli_info(f"Adding {add_cache} to {file_path}")
+    #TODO: implement this
 
-def modify_remove_cache_to_hcl(file_path, remove_cache):
-    cli_info(f"Removing {remove_cache} from {file_path}")
+def modify_remove_cache_to_hcl(file_path):
+    """
+    Param:
+        - file_path: str: The path to the Dockerfile to modify.
+    Returns: None
+    """
+    cli_info(f"Removing cache-to from {file_path}")
+    remove_cache_shared_method(file_path, "cache-to")
+
+def modify_remove_cache_from_hcl(file_path):
+    """
+    Param:
+        - file_path: str: The path to the Dockerfile to modify.
+    Returns: None
+    """
+    cli_info(f"Removing cache-to from {file_path}")
+    remove_cache_shared_method(file_path, "cache-from")
+
+def remove_cache_shared_method(file_path, cache_marker):
+    """
+    Params:
+        - file_path: str: The path to the Dockerfile to modify.
+    Returns: None
+    """
+    with open(file_path, "r") as f:
+        lines = f.readlines()
+
+    new_lines = []
+    
+    continue_skiping = False
+    for line in lines:
+        if f"{cache_marker} =" in line:
+            continue_skiping = True
+            if "]" in line:
+                new_lines.append(f"{cache_marker} = [ ]\n")
+                continue_skiping = False
+            else:
+                continue
+        else:
+            if "]" in line:
+                new_lines.append(f"{cache_marker} = [ ]\n")
+                continue_skiping = False
+            elif not continue_skiping:
+                new_lines.append(line)
+    
+
 
 # endregion
 
@@ -907,13 +952,19 @@ def main():
     elif args.command == "modify":
         cli_sub_title("Modifying Docker Bake HCL file...")
         if args.addArg:
-            modify_add_arg_to_hcl(args.file, args.addArg)
+            modify_add_arg_hcl(args.file, args.addArg)
         if args.removeArg:
-            modify_remove_arg_to_hcl(args.file, args.removeArg)
+            modify_remove_arg_hcl(args.file, args.removeArg)
+
+        # Add Cache flags
         if args.addCache:
             modify_add_cache_to_hcl(args.file, args.addCache)
-        if args.removeCache:
-            modify_remove_cache_to_hcl(args.file, args.removeCache)
+
+        # Clear cache flags
+        if args.clearCacheFrom:
+            modify_remove_cache_from_hcl(args.file)
+        if args.clearCacheTo:
+            modify_remove_cache_to_hcl(args.file)
 
     end_time = time.time()
 
@@ -927,50 +978,6 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description="Multi Multi-Stage Dockerfiles? Trying to move to docker baking but your dependencies are too complex?" +
     " Use this tool to help map out the dependency groups that can be built in parallel. Get a map of your dependencies and create the faster docker building you deserve.")
-    # parser.add_argument(
-    #     "-d", "--directory", 
-    #     type=str, 
-    #     required=True, 
-    #     help="Root directory to start search and parsing for Dockerfiles. Hint: make this the root directory of your project."
-    # )
-    # parser.add_argument(
-    #     "-o", "--outfile",
-    #     type=str,
-    #     default=os.path.join(os.getcwd(), "docker.hcl"),
-    #     help="Output file for Docker Bake HCL configuration. Defaults to 'docker.hcl' in the current working directory."
-    # )
-    # parser.add_argument(
-    #     "-t", "--tag",
-    #     type=str,
-    #     default="prebake",
-    #     help="Tag to use for the Docker Bake HCL configuration. Defaults to 'prebake'."
-    # )
-    # parser.add_argument(
-    #     "-v", "--verbose",
-    #     action="store_true",
-    #     help="Enable verbose output."
-    # )
-
-    # parser.add_argument(
-    #     "--optimize",
-    #     type=int,
-    #     default=0,
-    #     help="Optimize the Dockerfile for faster builds. Currently brute force method. Specify the number of brute force attempts to make. Will not optimize if not set."
-    # )
-
-    # parser.add_argument(
-    #     "--output",
-    #     type=int,
-    #     default=0,
-    #     help="Output the Docker Bake HCL configuration to a file. Defaults to 0 (no output). 1 = registry, 2 = local, 3 = registry, local."
-    # )
-
-    # parser.add_argument(
-    #     "--args",
-    #     type=str,
-    #     default=os.path.join(os.getcwd(), "prebakeArgs.txt"),
-    #     help="Specify a file to read args from."
-    # )
 
     # Modify hcl file once created.
     subparsers = parser.add_subparsers(dest="command", help="Subcommands")
