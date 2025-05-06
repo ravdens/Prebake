@@ -93,6 +93,14 @@ class DockerStage:
 
             if image_name_with_version == self.base_image:
                 self.base_image = self.base_image.split(":")[0]
+
+    def get_registry_value(self):
+        """
+        Getter for the registry value. Returns empty string if None.
+        Returns:
+            - str: The registry value for this stage.
+        """
+        return self.registry if self.registry is not None else ""
     
     def show(self):
         """
@@ -563,9 +571,10 @@ def validate_directory(directory):
         print(Fore.RED + f"# Error: {directory} is not a valid directory." + Style.RESET_ALL)
         exit(1)
 
-def valildate_arg_file(file_path):
+def valildate_modify_file(file_path):
     """
-    Validate if the given file exists and is a file.
+    Validate if the given file exists.
+    Used for the modify subcommand when modifying an existing file.
 
     Params:
         - file_path: str: The file to validate.
@@ -613,10 +622,11 @@ def create_docker_bake_hcl(sorted_groups, crossover_images, tag, output_file="do
                 for stage in group:
                     if stage.stage_name in all_written:
                         continue
+
                     all_written.add(stage.stage_name)
                     f.write(f'target "{stage.stage_name}" {{\n')
                     f.write(f'  dockerfile = "{stage.file_path}"\n')
-                    f.write(f'  target     = "{stage.registry}{stage.stage_name}"\n')
+                    f.write(f'  target     = "{stage.get_registry_value()}{stage.stage_name}"\n')
                     f.write( '  args = {\n')
                     f.write(f'    BASE_IMAGE = "{stage.base_image}"\n')
                     f.write( '  }\n')
@@ -624,6 +634,8 @@ def create_docker_bake_hcl(sorted_groups, crossover_images, tag, output_file="do
                         f.write(f'  tags = ["{stage.stage_name}:{tag}"]\n')
                         #TODO: decide if determining output by checking if tag is none or by in cross over is better
                         f.write(f'  {output}\n')
+                    f.write( '  cache-to = [ ]\n')
+                    f.write( '  cache-from = [ ]\n')
                     f.write("}\n\n")
 
             # Now write the groups
@@ -727,6 +739,69 @@ def optimize(stages, unresolved_set, crossover_stages, sorted_groups):
 
 # endregion
 
+# region Modify Logic
+
+def modify_add_arg_hcl(file_path, add_arg):
+    cli_info(f"Adding {add_arg} to {file_path}")
+    #TODO: implement this
+
+def modify_remove_arg_hcl(file_path, remove_arg):
+    cli_info(f"Removing {remove_arg} from {file_path}")
+    #TODO: implement this
+
+def modify_add_cache_to_hcl(file_path, add_cache):
+    cli_info(f"Adding {add_cache} to {file_path}")
+    #TODO: implement this
+
+def modify_remove_cache_to_hcl(file_path):
+    """
+    Param:
+        - file_path: str: The path to the Dockerfile to modify.
+    Returns: None
+    """
+    cli_info(f"Removing cache-to from {file_path}")
+    remove_cache_shared_method(file_path, "cache-to")
+
+def modify_remove_cache_from_hcl(file_path):
+    """
+    Param:
+        - file_path: str: The path to the Dockerfile to modify.
+    Returns: None
+    """
+    cli_info(f"Removing cache-to from {file_path}")
+    remove_cache_shared_method(file_path, "cache-from")
+
+def remove_cache_shared_method(file_path, cache_marker):
+    """
+    Params:
+        - file_path: str: The path to the Dockerfile to modify.
+    Returns: None
+    """
+    with open(file_path, "r") as f:
+        lines = f.readlines()
+
+    new_lines = []
+    
+    continue_skiping = False
+    for line in lines:
+        if f"{cache_marker} =" in line:
+            continue_skiping = True
+            if "]" in line:
+                new_lines.append(f"{cache_marker} = [ ]\n")
+                continue_skiping = False
+            else:
+                continue
+        else:
+            if "]" in line:
+                new_lines.append(f"{cache_marker} = [ ]\n")
+                continue_skiping = False
+            elif not continue_skiping:
+                new_lines.append(line)
+    
+
+
+# endregion
+
 # region CLI Display Functions
 
 def cli_header():
@@ -802,75 +877,94 @@ def main():
     validate_directory(args.directory)
     root_dir = args.directory
 
-    cli_sub_title("Starting Dockerfile parsing...")
-    stages = parse_dockerfiles(root_dir)    
+    if args.command == "scan":
 
-    check_no_duplicates(stages)
+        cli_sub_title("Starting Dockerfile parsing...")
+        stages = parse_dockerfiles(root_dir)    
 
-    cli_middle("Parsed Stages:")
-    for stage in stages:
-        cli_info(stage.show())
-    cli_middle(f"Count: {len(stages)}")
-    cli_div()
+        check_no_duplicates(stages)
 
-    crossover_stages = find_crossover_stages(stages)
-    cli_middle("Identifying crossover stages...")
-    for crossover in crossover_stages:
-        cli_info(f" {crossover}")
-    cli_div()
-
-    cli_middle("Identifying custom registries...")
-    for stage in stages:
-        if stage.registry is not None:
-            cli_info(f" {stage.registry}")
-    cli_div()
-
-    cli_middle("Identifying unique tags...")
-    unique_tags = set()
-    for stage in stages:
-        if stage.version_tag is not None:
-            unique_tags.add(stage.version_tag)
-    for tag in unique_tags:
-        cli_info(f" {tag}")
-    cli_div()
-
-    if args.verbose:
-        cli_middle("Pre Deep dependency - stage order")
-        for item in stages:
-            cli_info(f" {item.show()}")
+        cli_middle("Parsed Stages:")
+        for stage in stages:
+            cli_info(stage.show())
+        cli_middle(f"Count: {len(stages)}")
         cli_div()
 
-    #TODO: Consider removing shuffle. Windows and Linux end up with different orderings. This creates a less efficient build order
-    #  when run on Linux. In an effort to help development better target Linux, leave this shuffle in for now.
-    random.shuffle(stages)
+        crossover_stages = find_crossover_stages(stages)
+        cli_middle("Identifying crossover stages...")
+        for crossover in crossover_stages:
+            cli_info(f" {crossover}")
+        cli_div()
 
-    cli_middle("Deep dependency search")
-    unresolved_set = set()
-    deep_dependency_search(stages, unresolved_set, crossover_stages)
-    cli_middle()
-    for item in stages:
-        cli_info(f" {item.show()}")
+        cli_middle("Identifying custom registries...")
+        for stage in stages:
+            if stage.registry is not None:
+                cli_info(f" {stage.registry}")
+        cli_div()
 
-    cli_div()
-    cli_unresolved(unresolved_set)
-    cli_div()
+        cli_middle("Identifying unique tags...")
+        unique_tags = set()
+        for stage in stages:
+            if stage.version_tag is not None:
+                unique_tags.add(stage.version_tag)
+        for tag in unique_tags:
+            cli_info(f" {tag}")
+        cli_div()
 
-    sorted_groups = group_stages_by_build_order(stages, unresolved_set)
+        if args.verbose:
+            cli_middle("Pre Deep dependency - stage order")
+            for item in stages:
+                cli_info(f" {item.show()}")
+            cli_div()
 
-    # Optimize does not mutate. Save returned value to stages
-    sorted_groups = optimize(stages, unresolved_set, crossover_stages, sorted_groups)
+        #TODO: Consider removing shuffle. Windows and Linux end up with different orderings. This creates a less efficient build order
+        #  when run on Linux. In an effort to help development better target Linux, leave this shuffle in for now.
+        random.shuffle(stages)
 
-    cli_middle()
-    cli_middle("Sorted groups by build order:")
-    for group in sorted_groups:
-        cli_middle(" Group:")
-        for stage in group:
-            cli_info(stage.show())
-    cli_middle()
+        cli_middle("Deep dependency search")
+        unresolved_set = set()
+        deep_dependency_search(stages, unresolved_set, crossover_stages)
+        cli_middle()
+        for item in stages:
+            cli_info(f" {item.show()}")
 
-    cli_div()
-    cli_middle("Creating Docker Bake HCL file...")
-    create_docker_bake_hcl(sorted_groups, crossover_stages, args.tag, args.outfile)
+        cli_div()
+        cli_unresolved(unresolved_set)
+        cli_div()
+
+        sorted_groups = group_stages_by_build_order(stages, unresolved_set)
+
+        # Optimize does not mutate. Save returned value to stages
+        sorted_groups = optimize(stages, unresolved_set, crossover_stages, sorted_groups)
+
+        cli_middle()
+        cli_middle("Sorted groups by build order:")
+        for group in sorted_groups:
+            cli_middle(" Group:")
+            for stage in group:
+                cli_info(stage.show())
+        cli_middle()
+
+        cli_div()
+        cli_middle("Creating Docker Bake HCL file...")
+        create_docker_bake_hcl(sorted_groups, crossover_stages, args.tag, args.outfile)
+
+    elif args.command == "modify":
+        cli_sub_title("Modifying Docker Bake HCL file...")
+        if args.addArg:
+            modify_add_arg_hcl(args.file, args.addArg)
+        if args.removeArg:
+            modify_remove_arg_hcl(args.file, args.removeArg)
+
+        # Add Cache flags
+        if args.addCache:
+            modify_add_cache_to_hcl(args.file, args.addCache)
+
+        # Clear cache flags
+        if args.clearCacheFrom:
+            modify_remove_cache_from_hcl(args.file)
+        if args.clearCacheTo:
+            modify_remove_cache_to_hcl(args.file)
 
     end_time = time.time()
 
@@ -884,49 +978,114 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description="Multi Multi-Stage Dockerfiles? Trying to move to docker baking but your dependencies are too complex?" +
     " Use this tool to help map out the dependency groups that can be built in parallel. Get a map of your dependencies and create the faster docker building you deserve.")
-    parser.add_argument(
+
+    # Modify hcl file once created.
+    subparsers = parser.add_subparsers(dest="command", help="Subcommands")
+
+    # Subcommand: scan
+    scan_parser = subparsers.add_parser("scan", help="Scan a project file for Dockerfiles, determine build order dependencies,"
+        " and create a Docker Bake HCL file.")
+    
+    scan_parser.add_argument(
         "-d", "--directory", 
         type=str, 
         required=True, 
         help="Root directory to start search and parsing for Dockerfiles. Hint: make this the root directory of your project."
     )
-    parser.add_argument(
+    scan_parser.add_argument(
         "-o", "--outfile",
         type=str,
         default=os.path.join(os.getcwd(), "docker.hcl"),
         help="Output file for Docker Bake HCL configuration. Defaults to 'docker.hcl' in the current working directory."
     )
-    parser.add_argument(
+    scan_parser.add_argument(
         "-t", "--tag",
         type=str,
         default="prebake",
         help="Tag to use for the Docker Bake HCL configuration. Defaults to 'prebake'."
     )
-    parser.add_argument(
+    scan_parser.add_argument(
         "-v", "--verbose",
         action="store_true",
         help="Enable verbose output."
     )
 
-    parser.add_argument(
+    scan_parser.add_argument(
         "--optimize",
         type=int,
         default=0,
         help="Optimize the Dockerfile for faster builds. Currently brute force method. Specify the number of brute force attempts to make. Will not optimize if not set."
     )
 
-    parser.add_argument(
+    scan_parser.add_argument(
         "--output",
         type=int,
         default=0,
         help="Output the Docker Bake HCL configuration to a file. Defaults to 0 (no output). 1 = registry, 2 = local, 3 = registry, local."
     )
 
-    parser.add_argument(
-        "--args",
+    # Subcommand: modify
+    modify_parser = subparsers.add_parser("modify", help="Modify prebake arguments")
+
+    modify_parser.add_argument(
+        "--addArg",
+        type=str,
+        nargs=2,
+        default=os.path.join(os.getcwd(), "prebakeArgs.txt"),
+        help="Add an argument to all of the targets in the specified file. Requires two arguments: the name of the argument and the value to set it to." \
+            "ex: --addArg BASE_IMAGE my_base_image"
+    )
+
+    modify_parser.add_argument(
+        "--removeArg",
         type=str,
         default=os.path.join(os.getcwd(), "prebakeArgs.txt"),
-        help="Specify a file to read args from."
+        help="Remove an argument from all of the targets in the specified file. Requires one argument: the name of the argument to remove."
+    )
+
+    modify_parser.add_argument(
+        "--addCacheFrom",
+        type=str,
+        nargs=2,
+        default=os.path.join(os.getcwd(), "prebakeArgs.txt"),
+        help="Add an argument to all of the targets in the specified file."
+    )
+
+    modify_parser.add_argument(
+        "--addCacheTo",
+        type=str,
+        nargs=2,
+        default=os.path.join(os.getcwd(), "prebakeArgs.txt"),
+        help="Add an argument to all of the targets in the specified file."
+    )
+
+    modify_parser.add_argument(
+        "--clearCacheTo",
+        action="store_true",
+        default=os.path.join(os.getcwd(), "prebakeArgs.txt"),
+        help="Clear all of the cache to settings."
+    )
+
+    modify_parser.add_argument(
+        "--clearCacheFrom",
+        action="store_true",
+        default=os.path.join(os.getcwd(), "prebakeArgs.txt"),
+        help="Clear all of the cache from settings."
+    )
+
+    modify_parser.add_argument(
+        "--clearCache",
+        action="store_true",
+        default=os.path.join(os.getcwd(), "prebakeArgs.txt"),
+        help="Clear all cache. Just pass this flag. No other arguments needed."
+    )
+
+    modify_parser.add_argument(
+        "--file",
+        type=str,
+        required=True,
+        default=os.path.join(os.getcwd(), "docker.hcl"),
+        help="Specify which docker hcl file to add arguments to."
     )
 
 
