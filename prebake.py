@@ -93,6 +93,14 @@ class DockerStage:
 
             if image_name_with_version == self.base_image:
                 self.base_image = self.base_image.split(":")[0]
+
+    def get_registry_value(self):
+        """
+        Getter for the registry value. Returns empty string if None.
+        Returns:
+            - str: The registry value for this stage.
+        """
+        return self.registry if self.registry is not None else ""
     
     def show(self):
         """
@@ -601,7 +609,7 @@ def create_docker_bake_hcl(sorted_groups, crossover_images, tag, output_file="do
                     all_written.add(stage.stage_name)
                     f.write(f'target "{stage.stage_name}" {{\n')
                     f.write(f'  dockerfile = "{stage.file_path}"\n')
-                    f.write(f'  target     = "{stage.registry}{stage.stage_name}"\n')
+                    f.write(f'  target     = "{stage.get_registry_value()}{stage.stage_name}"\n')
                     f.write( '  args = {\n')
                     f.write(f'    BASE_IMAGE = "{stage.base_image}"\n')
                     f.write( '  }\n')
@@ -609,6 +617,8 @@ def create_docker_bake_hcl(sorted_groups, crossover_images, tag, output_file="do
                         f.write(f'  tags = ["{stage.stage_name}:{tag}"]\n')
                         #TODO: decide if determining output by checking if tag is none or by in cross over is better
                         f.write(f'  {output}\n')
+                    f.write( '  cache-to = [ ]\n')
+                    f.write( '  cache-from = [ ]\n')
                     f.write("}\n\n")
 
             # Now write the groups
@@ -649,7 +659,7 @@ def optimize(stages, unresolved_set, crossover_stages, sorted_groups):
     re_enable_verbose = False
     if args.verbose:
         re_enable_verbose = True
-        args.verbose = False
+        args.verbose = False 
     
     str_num_attempts = str(args.optimize)
     
