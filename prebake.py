@@ -917,6 +917,13 @@ if __name__ == "__main__":
         help="Output the Docker Bake HCL configuration to a file. Defaults to 0 (no output). 1 = registry, 2 = local, 3 = registry, local."
     )
 
+    parser.add_argument(
+        "--fileFormat",
+        type=str,
+        default="hcl",
+        help="Output the Docker Bake HCL configuration to a file. Valid options are 'hcl' or 'json'. Defaults to 'hcl'."
+    )
+
 
     global args
     args = parser.parse_args()
