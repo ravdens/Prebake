@@ -880,6 +880,12 @@ def main():
         else:
             args.outfile = "docker.json"
 
+    if args.version:
+        cli_sub_title("Starting Dockerfile parsing...")
+        cli_middle("Prebake version: 0.1.0")
+        cli_footer()
+        exit(0)
+
     cli_sub_title("Starting Dockerfile parsing...")
     stages = parse_dockerfiles(root_dir)    
 
@@ -965,8 +971,11 @@ def main():
  
 if __name__ == "__main__":
     
-    parser = argparse.ArgumentParser(description="Multi Multi-Stage Dockerfiles? Trying to move to docker baking but your dependencies are too complex?" +
-    " Use this tool to help map out the dependency groups that can be built in parallel. Get a map of your dependencies and create the faster docker building you deserve.")
+    parser = argparse.ArgumentParser(
+        description="Multi Multi-Stage Dockerfiles? Trying to move to docker baking but your dependencies are too complex?" +
+    " Use this tool to help map out the dependency groups that can be built in parallel. Get a map of your dependencies and create the faster docker building you deserve."
+    )
+
     parser.add_argument(
         "-d", "--directory", 
         type=str, 
@@ -1010,6 +1019,13 @@ if __name__ == "__main__":
         type=str,
         default="hcl",
         help="Output the Docker Bake HCL configuration to a file. Valid options are 'hcl' or 'json'. Defaults to 'hcl'."
+    )
+
+    parser.add_argument(
+        "--version",
+        type=bool,
+        default=False,
+        help="Output version number and exit the script."
     )
 
 
