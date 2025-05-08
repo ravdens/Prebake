@@ -6,3 +6,5 @@ venvPrebake/
 
 # Ignore all files with .hcl extension
 *.hcl
+# Ignore all files with .json extension
+*.json
