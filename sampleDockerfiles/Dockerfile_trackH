@@ -21,8 +21,6 @@ RUN --mount=type=bind,from=track-h-pre-build,source=/track-h-pre-build.txt,targe
     cp /tmp/from-pre.txt ./track-h-build.txt
 
 COPY . .
-RUN pip install --no-cache-dir -r requirements.txt
-
 
 # ---- Stage 3: Final Runtime ----
 FROM fedora:43 AS track-h-final

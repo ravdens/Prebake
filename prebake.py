@@ -8,6 +8,7 @@ import logging, sys
 import argparse
 import pdb
 import random
+import json
 
 logging.basicConfig(
     stream=sys.stdout,
@@ -119,6 +120,11 @@ class DockerStage:
 
     def __repr__(self):
         return f"File: {self.file_path} ---- FROM: {self.base_image} AS {self.stage_name}"
+
+
+
+
+
 
 # endregion
 
@@ -635,6 +641,66 @@ def create_docker_bake_hcl(sorted_groups, crossover_images, tag, output_file="do
         cli_error(f"Error writing to file {output_file}:")
         cli_error(str(e))
 
+def create_docker_bake_json(sorted_groups, crossover_images, tag, output_file="docker_bake.hcl"):
+    """
+    Create a Docker Bake JSON file based on the sorted groups of DockerStage objects.
+    
+    Params:
+        - sorted_groups: list[list[DockerStage]] - groups of stages that can be built in parallel.
+        - crossover_images: list[str] - list of crossover images to be tagged.
+        - tag: str - tag to use for the Docker Bake JSON configuration.
+        - output_file: str - name/path of the output JSON file.
+    Returns:
+        - None : writes file to disk when called.
+    """
+
+    
+    bake_json = {
+        "target": {},
+        "group": {}
+    }
+
+    # Generate targets
+    for group in sorted_groups:
+        for stage in group:
+            target = {
+                "dockerfile": str(stage.file_path),
+                "target": f"{stage.get_registry_value()}{stage.stage_name}",
+                "args": {
+                    "BASE_IMAGE": stage.base_image
+                },
+                "cache-to": [],
+                "cache-from": []
+            }
+            if stage.stage_name in crossover_images:
+                target["tags"] = [f"{stage.stage_name}:{tag}"]
+                # Add output if applicable
+                if args.output != 0:
+                    if args.output == 1:
+                        target["output"] = ["type=registry"]
+                    elif args.output == 2:
+                        target["output"] = ["type=docker"]
+                    elif args.output == 3:
+                        target["output"] = ["type=registry", "type=docker"]
+            bake_json["target"][stage.stage_name] = target
+
+    # Generate groups
+    for idx, group in enumerate(sorted_groups, start=1):
+        group_name = f"group{idx}"
+        target_names = [stage.stage_name for stage in group]
+        bake_json["group"][group_name] = {
+            "targets": target_names
+        }
+
+    # Write to file
+    try:
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(bake_json, f, indent=4)
+        cli_info(f"Successfully created {output_file}")
+    except Exception as e:
+        cli_error(f"Error writing to file {output_file}:")
+        cli_error(str(e))
+
 # endregion
 
 # region Optimize Logic
@@ -652,6 +718,7 @@ def optimize(stages, unresolved_set, crossover_stages, sorted_groups):
         -sorted_groups: list[list[DockerStage]]: A list of groups of stages that can be built in parallel.
     """
 
+    # Ensure optimization is enabled
     if args.optimize == 0:
         return
     
@@ -719,6 +786,10 @@ def optimize(stages, unresolved_set, crossover_stages, sorted_groups):
         args.verbose = True
 
     return best_attempt
+
+# endregion
+
+# region Modify Logic
 
 # endregion
 
@@ -797,6 +868,18 @@ def main():
     validate_directory(args.directory)
     root_dir = args.directory
 
+    # Validate output bake file format
+    if args.fileFormat != "hcl" and args.fileFormat != "json":
+        cli_error(f"Invalid file format: {args.fileFormat}. Valid options are 'hcl' or 'json'.")
+        exit(1)
+
+    # TODO: consider a more elegant way to handle default output file names
+    if args.outfile is "docker":
+        if args.fileFormat == "hcl":
+            args.outfile = "docker.hcl"
+        else:
+            args.outfile = "docker.json"
+
     cli_sub_title("Starting Dockerfile parsing...")
     stages = parse_dockerfiles(root_dir)    
 
@@ -853,7 +936,8 @@ def main():
     sorted_groups = group_stages_by_build_order(stages, unresolved_set)
 
     # Optimize does not mutate. Save returned value to stages
-    sorted_groups = optimize(stages, unresolved_set, crossover_stages, sorted_groups)
+    if args.optimize > 0:
+        sorted_groups = optimize(stages, unresolved_set, crossover_stages, sorted_groups)
 
     cli_middle()
     cli_middle("Sorted groups by build order:")
@@ -864,8 +948,12 @@ def main():
     cli_middle()
 
     cli_div()
-    cli_middle("Creating Docker Bake HCL file...")
-    create_docker_bake_hcl(sorted_groups, crossover_stages, args.tag, args.outfile)
+    if args.fileFormat == "json":
+        cli_middle("Creating Docker Bake JSON file...")
+        create_docker_bake_json(sorted_groups, crossover_stages, args.tag, args.outfile)
+    else:
+        cli_middle("Creating Docker Bake HCL file...")
+        create_docker_bake_hcl(sorted_groups, crossover_stages, args.tag, args.outfile)
 
     end_time = time.time()
 
@@ -888,7 +976,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-o", "--outfile",
         type=str,
-        default=os.path.join(os.getcwd(), "docker.hcl"),
+        default=os.path.join(os.getcwd(), "docker"),
         help="Output file for Docker Bake HCL configuration. Defaults to 'docker.hcl' in the current working directory."
     )
     parser.add_argument(
