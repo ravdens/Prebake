@@ -549,9 +549,9 @@ def group_stages_by_build_order(stages, unresolved_set):
                 for dep_name in to_be_satisfied_names:
                     satisfied_names.add(dep_name)
 
-        # Check if it's the last item
-        if idx == len(ordered_stages) - 1:  
-            all_groups.append(current_group)
+            # Check if it's the last item
+            if idx == len(ordered_stages) - 1:  
+                all_groups.append(current_group)
 
         return all_groups
     
@@ -577,13 +577,17 @@ def validate_directory(directory):
         print(Fore.RED + f"# Error: {directory} is not a valid directory." + Style.RESET_ALL)
         exit(1)
 
-def create_docker_bake_hcl(sorted_groups, crossover_images, tag, output_file="docker_bake.hcl"):
+def create_docker_bake_hcl(sorted_groups, crossover_images, tag, output_file="docker_bake.hcl", stages=None, unresolved_set=None):
     """
     Create a Docker Bake HCL file based on the sorted groups of DockerStage objects.
     
     Params:
         - sorted_groups: list[list[DockerStage]] - groups of stages that can be built in parallel.
+        - crossover_images: set - set of crossover image names
+        - tag: str - tag to use for images
         - output_file: str - name/path of the output HCL file.
+        - stages: list[DockerStage] - all stages to check for local dependencies
+        - unresolved_set: set - set of unresolved dependencies (external images)
     Returns:
         - None : writes file to disk when called.
     """
@@ -602,6 +606,13 @@ def create_docker_bake_hcl(sorted_groups, crossover_images, tag, output_file="do
         output = f"output = [{output}]"
     
 
+    # Build a set of all local stage names for dependency checking
+    all_stage_names = set()
+    if stages:
+        all_stage_names = {stage.stage_name for stage in stages}
+    
+    unresolved_set = unresolved_set or set()
+
     try:
         with open(output_file, "w", encoding="utf-8") as f:
             f.write('// Docker Bake HCL file generated automatically with Prebake\n\n')
@@ -619,20 +630,68 @@ def create_docker_bake_hcl(sorted_groups, crossover_images, tag, output_file="do
                     f.write( '  args = {\n')
                     f.write(f'    BASE_IMAGE = "{stage.base_image}"\n')
                     f.write( '  }\n')
+                    
+                    # Find local dependencies (dependencies that are other stages, not external images)
+                    local_deps = []
+                    contexts = {}
+                    
+                    # Check if base_image is a local dependency
+                    base_image_name = stage.base_image
+                    if base_image_name in all_stage_names and base_image_name not in unresolved_set and base_image_name != stage.stage_name:
+                        local_deps.append(base_image_name)
+                        # Add context mapping for local base images (with tag for crossover images)
+                        if base_image_name in crossover_images:
+                            # For crossover images, map both with and without tag
+                            contexts[f"{base_image_name}:{tag}"] = f"target:{base_image_name}"
+                        contexts[base_image_name] = f"target:{base_image_name}"
+                    
+                    for dep in stage.get_all_dependencies():
+                        # If dependency is a local stage (not unresolved/external), add it to depends-on
+                        if dep in all_stage_names and dep not in unresolved_set and dep != stage.stage_name:
+                            if dep not in local_deps:  # Avoid duplicates
+                                local_deps.append(dep)
+                            # Add context mapping for local dependencies (with tag for crossover images)
+                            if dep in crossover_images:
+                                # For crossover images, map both with and without tag
+                                contexts[f"{dep}:{tag}"] = f"target:{dep}"
+                            if dep not in contexts:  # Avoid overwriting if already added
+                                contexts[dep] = f"target:{dep}"
+                    
+                    # Add contexts if we have local dependencies used as base images
+                    if contexts:
+                        f.write( '  contexts = {\n')
+                        for img_ref, target_ref in sorted(contexts.items()):
+                            f.write(f'    "{img_ref}" = "{target_ref}"\n')
+                        f.write( '  }\n')
+                    
+                    # Add depends-on field if there are local dependencies
+                    if local_deps:
+                        dep_names = [f'"{dep}"' for dep in local_deps]
+                        f.write(f'  depends-on = [{", ".join(dep_names)}]\n')
+                    
                     if stage.stage_name in crossover_images:
                         f.write(f'  tags = ["{stage.stage_name}:{tag}"]\n')
                         #TODO: decide if determining output by checking if tag is none or by in cross over is better
-                        f.write(f'  {output}\n')
+                        if output is not None:
+                            f.write(f'  {output}\n')
                     f.write( '  cache-to = [ ]\n')
                     f.write( '  cache-from = [ ]\n')
                     f.write("}\n\n")
 
             # Now write the groups
+            group_names = []
             for idx, group in enumerate(sorted_groups, start=1):
                 group_name = f"group{idx}"
+                group_names.append(f'"{group_name}"')
                 target_names = [f'"{stage.stage_name}"' for stage in group]
                 f.write(f'group "{group_name}" {{\n')
                 f.write(f'  targets = [{", ".join(target_names)}]\n')
+                f.write("}\n\n")
+
+            # Add a default group that builds all groups
+            if group_names:
+                f.write('group "default" {\n')
+                f.write(f'  targets = [{", ".join(group_names)}]\n')
                 f.write("}\n\n")
 
         cli_info(f"Successfully created {output_file}")
@@ -685,11 +744,19 @@ def create_docker_bake_json(sorted_groups, crossover_images, tag, output_file="d
             bake_json["target"][stage.stage_name] = target
 
     # Generate groups
+    group_names = []
     for idx, group in enumerate(sorted_groups, start=1):
         group_name = f"group{idx}"
+        group_names.append(group_name)
         target_names = [stage.stage_name for stage in group]
         bake_json["group"][group_name] = {
             "targets": target_names
+        }
+
+    # Add a default group that builds all groups
+    if group_names:
+        bake_json["group"]["default"] = {
+            "targets": group_names
         }
 
     # Write to file
@@ -874,7 +941,7 @@ def main():
         exit(1)
 
     # TODO: consider a more elegant way to handle default output file names
-    if args.outfile is "docker":
+    if args.outfile == "docker":
         if args.fileFormat == "hcl":
             args.outfile = "docker.hcl"
         else:
@@ -959,7 +1026,7 @@ def main():
         create_docker_bake_json(sorted_groups, crossover_stages, args.tag, args.outfile)
     else:
         cli_middle("Creating Docker Bake HCL file...")
-        create_docker_bake_hcl(sorted_groups, crossover_stages, args.tag, args.outfile)
+        create_docker_bake_hcl(sorted_groups, crossover_stages, args.tag, args.outfile, stages, unresolved_set)
 
     end_time = time.time()
 

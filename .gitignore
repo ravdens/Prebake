@@ -8,3 +8,8 @@ venvPrebake/
 *.hcl
 # Ignore all files with .json extension
 *.json
+
+# Ignore generated docker file
+docker
+
+.idea
