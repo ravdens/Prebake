@@ -874,7 +874,7 @@ def main():
         exit(1)
 
     # TODO: consider a more elegant way to handle default output file names
-    if args.outfile is "docker":
+    if args.outfile == "docker":
         if args.fileFormat == "hcl":
             args.outfile = "docker.hcl"
         else:
@@ -1023,7 +1023,7 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "--version",
-        type=bool,
+        action="store_true",
         default=False,
         help="Output version number and exit the script."
     )
