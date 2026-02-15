@@ -9,6 +9,8 @@ import argparse
 import pdb
 import random
 import json
+import multiprocessing
+import copy
 
 logging.basicConfig(
     stream=sys.stdout,
@@ -705,6 +707,66 @@ def create_docker_bake_json(sorted_groups, crossover_images, tag, output_file="d
 
 # region Optimize Logic
 
+def _run_single_optimization_attempt(args_tuple):
+    """
+    Worker function for parallel optimization. Must be at module level for pickling.
+    
+    Params:
+        - args_tuple: tuple containing (stages_data, unresolved_set, crossover_stages, attempt_id)
+    Returns:
+        - list[list[dict]]: A list of groups with stage data for this attempt.
+    """
+    stages_data, unresolved_set, crossover_stages = args_tuple
+    
+    # Reconstruct DockerStage objects from serialized data
+    reconstructed_stages = []
+    for stage_data in stages_data:
+        stage = DockerStage.__new__(DockerStage)
+        stage.file_path = Path(stage_data['file_path'])
+        stage.stage_name = stage_data['stage_name']
+        stage.base_image = stage_data['base_image']
+        stage.registry = stage_data['registry']
+        stage.version_tag = stage_data['version_tag']
+        stage.usage_dependencies = set(stage_data['usage_dependencies'])
+        stage.usage_dependencies_list = list(stage_data['usage_dependencies_list'])
+        stage.explored = False
+        stage.grouped = False
+        reconstructed_stages.append(stage)
+    
+    # Randomize dependencies for this attempt
+    for stage in reconstructed_stages:
+        random.shuffle(stage.usage_dependencies_list)
+    
+    # Run dependency search
+    for stage in reconstructed_stages:
+        if stage.explored:
+            continue
+        else:
+            orig_stage = find_stage_by_name(reconstructed_stages, stage.stage_name)
+            deep_recursion(reconstructed_stages, orig_stage, stage, unresolved_set, crossover_stages)
+            stage.explored = True
+    
+    deep_dependency_search(reconstructed_stages, unresolved_set, crossover_stages)
+    attempt_sorted_groups = group_stages_by_build_order(reconstructed_stages, unresolved_set)
+    
+    return attempt_sorted_groups
+
+
+def _serialize_stages(stages):
+    """
+    Serialize DockerStage objects to dictionaries for multiprocessing.
+    """
+    return [{
+        'file_path': str(stage.file_path),
+        'stage_name': stage.stage_name,
+        'base_image': stage.base_image,
+        'registry': stage.registry,
+        'version_tag': stage.version_tag,
+        'usage_dependencies': list(stage.usage_dependencies),
+        'usage_dependencies_list': list(stage.usage_dependencies_list)
+    } for stage in stages]
+
+
 def optimize(stages, unresolved_set, crossover_stages, sorted_groups):
     """
     Optimize the Dockerfile stages by performing a deep dependency search and grouping them by build order.
@@ -730,40 +792,36 @@ def optimize(stages, unresolved_set, crossover_stages, sorted_groups):
     
     str_num_attempts = str(args.optimize)
     
-    # List to contain all brute force attempts to group stages
-    grouping_attempts = []
-    optimization_attempts = args.optimize
+    # Determine number of cores to use
+    available_cores = os.cpu_count() or 1
+    max_cores = max(1, available_cores - 1)  # Enforce n-1 cores
+    requested_cores = args.cores if args.cores > 0 else max_cores
+    cores_to_use = min(requested_cores, max_cores)
     
-    # Do not mutate the originals during the optimization process
+    cli_info(f"Available cores: {available_cores}, Using: {cores_to_use} (max allowed: {max_cores})")
+    
     # Prepare the original stages to be optimized
     for stage in stages:
         stage.init_optimize_dependencies_list()
-    clone_stages = stages.copy()
+    
+    # Serialize stages for multiprocessing
+    serialized_stages = _serialize_stages(stages)
     clone_unresolved_set = unresolved_set.copy()
     clone_crossover_stages = crossover_stages.copy()
-    clone_sorted_groups = sorted_groups.copy()
-
-    while optimization_attempts > 0:
-        for stage in clone_stages:
-            stage.explored = False
-            stage.grouped = False
-            # Randomize the list. Hopefully things land better
-            random.shuffle(stage.usage_dependencies_list)
-
-        for stage in clone_stages:
-            # If the stage has already been explored, skip it
-            if stage.explored:
-                continue
-            else:
-                orig_stage = find_stage_by_name(clone_stages, stage.stage_name)
-                deep_recursion(clone_stages, orig_stage, stage, clone_unresolved_set, clone_crossover_stages)
-                stage.explored = True
-
-        deep_dependency_search(clone_stages, clone_unresolved_set, clone_crossover_stages)
-        attempt_sorted_groups = group_stages_by_build_order(clone_stages, clone_unresolved_set)
-        grouping_attempts.append(attempt_sorted_groups)
-
-        optimization_attempts -= 1
+    
+    # Create argument tuples for each optimization attempt
+    work_items = [
+        (serialized_stages, clone_unresolved_set, clone_crossover_stages)
+        for _ in range(args.optimize)
+    ]
+    
+    # Run optimization attempts in parallel
+    if cores_to_use > 1 and args.optimize > 1:
+        with multiprocessing.Pool(processes=cores_to_use) as pool:
+            grouping_attempts = pool.map(_run_single_optimization_attempt, work_items)
+    else:
+        # Fall back to sequential execution for single core or single attempt
+        grouping_attempts = [_run_single_optimization_attempt(item) for item in work_items]
 
     # Determine the number of groups produced by the brute force attempts
     # Log the best and worst attempts
@@ -970,6 +1028,8 @@ def main():
 # endregion
  
 if __name__ == "__main__":
+    # Required for Windows multiprocessing support
+    multiprocessing.freeze_support()
     
     parser = argparse.ArgumentParser(
         description="Multi Multi-Stage Dockerfiles? Trying to move to docker baking but your dependencies are too complex?" +
@@ -1005,6 +1065,13 @@ if __name__ == "__main__":
         type=int,
         default=0,
         help="Optimize the Dockerfile for faster builds. Currently brute force method. Specify the number of brute force attempts to make. Will not optimize if not set."
+    )
+
+    parser.add_argument(
+        "--cores",
+        type=int,
+        default=0,
+        help="Number of CPU cores to use for parallel optimization. Defaults to 0 (auto-detect, uses n-1 cores). Maximum is always capped at n-1 to leave one core free."
     )
 
     parser.add_argument(
